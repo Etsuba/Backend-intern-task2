@@ -1,74 +1,87 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const { User, Event, Registration } = require('./model');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { User, Event, Registration } = require('./model'); // Ensure this is named 'model.js'
+const { verifyToken, isAdmin } = require('./middleware/auth');
 
 const app = express();
 app.use(express.json());
 
-// Replace 'your_mongodb_uri' with your actual MongoDB connection string
-// (You can get a free one from MongoDB Atlas or use 'mongodb://localhost:27017/eventDB')
-// --- USER ROUTES ---
+const JWT_SECRET = "internship_secret_key_123"; // Use a real secret in production!
 
-// Create a new User
-app.post('/users', async (req, res) => {
+// --- DATABASE CONNECTION ---
+mongoose.connect('mongodb://localhost:27017/eventDB')
+    .then(() => console.log("✅ Connected to MongoDB"))
+    .catch(err => console.error("❌ Connection error", err));
+
+// --- AUTHENTICATION ROUTES ---
+
+// 1. Signup (Updated to handle passwords)
+app.post('/auth/signup', async (req, res) => {
     try {
-        const newUser = new User(req.body);
+        const { name, email, password, role } = req.body;
+        
+        // Hash the password for security
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        const newUser = new User({ 
+            name, 
+            email, 
+            password: hashedPassword, 
+            role: role || 'user' // Default to 'user' if not specified
+        });
+
         await newUser.save();
-        res.status(201).json(newUser);
+        res.status(201).json({ message: "User created successfully!", userId: newUser._id });
     } catch (err) {
         res.status(400).json({ error: "Email already exists or invalid data" });
     }
 });
 
-// View all Users (handy for finding IDs)
-app.get('/users', async (req, res) => {
-    const users = await User.find();
-    res.json(users);
+// 2. Login (This provides the Token for Thunder Client)
+app.post('/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        const user = await User.findOne({ email });
+
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.status(401).json({ error: "Invalid email or password" });
+        }
+
+        // Create the Token (The "ID Card")
+        const token = jwt.sign(
+            { id: user._id, role: user.role }, 
+            JWT_SECRET, 
+            { expiresIn: '1h' }
+        );
+
+        res.json({ message: "Login successful", token, role: user.role });
+    } catch (err) {
+        res.status(500).json({ error: "Login failed" });
+    }
 });
 
-mongoose.connect('mongodb://localhost:27017/eventDB')
-    .then(() => console.log("✅ Connected to MongoDB"))
-    .catch(err => console.error("❌ Connection error", err));
+// --- EVENT ROUTES ---
 
-// --- ROUTES ---
-
-// 1. Create an Event (To seed your database)
-app.post('/events', async (req, res) => {
-    const newEvent = new Event(req.body);
-    await newEvent.save();
-    res.json(newEvent);
+// 3. Create an Event (PROTECTED: Only Admins can create events)
+app.post('/events', verifyToken, isAdmin, async (req, res) => {
+    try {
+        const newEvent = new Event(req.body);
+        await newEvent.save();
+        res.status(201).json(newEvent);
+    } catch (err) {
+        res.status(400).json({ error: "Could not create event" });
+    }
 });
 
-// 2. View all events
+// 4. View all events (PUBLIC: Anyone can see events)
 app.get('/events', async (req, res) => {
     const events = await Event.find();
     res.json(events);
 });
 
-// 3. Register for an Event
-app.post('/register', async (req, res) => {
-    const { userId, eventId } = req.body;
-    const reg = new Registration({ user: userId, event: eventId });
-    await reg.save();
-    res.json({ message: "Registered successfully!", registrationId: reg._id });
-});
-
-// 4. View User Registrations (The "Linking" Part)
-app.get('/my-registrations/:userId', async (req, res) => {
-    // We populate both 'user' and 'event' to show the full link
-    const myRegs = await Registration.find({ user: req.params.userId })
-        .populate('user', 'name email') // Only show name and email, hide the rest
-        .populate('event');
-    res.json(myRegs);
-});
-
-// 5. Cancel Registration
-app.delete('/cancel/:regId', async (req, res) => {
-    await Registration.findByIdAndDelete(req.params.regId);
-    res.json({ message: "Registration cancelled" });
-});
-
-// 6. View specific event details
+// 5. View specific event details (PUBLIC)
 app.get('/events/:id', async (req, res) => {
     try {
         const event = await Event.findById(req.params.id);
@@ -79,4 +92,38 @@ app.get('/events/:id', async (req, res) => {
     }
 });
 
-app.listen(3001, () => console.log('Server running on http://localhost:3001'));
+// --- REGISTRATION ROUTES ---
+
+// 6. Register for an Event (PROTECTED: Must be logged in)
+app.post('/register', verifyToken, async (req, res) => {
+    try {
+        const { eventId } = req.body;
+        // We get userId automatically from the token (req.user.id)
+        const reg = new Registration({ user: req.user.id, event: eventId });
+        await reg.save();
+        res.json({ message: "Registered successfully!", registrationId: reg._id });
+    } catch (err) {
+        res.status(500).json({ error: "Registration failed" });
+    }
+});
+
+// 7. View My Registrations (PROTECTED: Must be logged in)
+app.get('/my-registrations', verifyToken, async (req, res) => {
+    const myRegs = await Registration.find({ user: req.user.id })
+        .populate('user', 'name email')
+        .populate('event');
+    res.json(myRegs);
+});
+
+// 8. Cancel Registration (PROTECTED)
+app.delete('/cancel/:regId', verifyToken, async (req, res) => {
+    try {
+        await Registration.findByIdAndDelete(req.params.regId);
+        res.json({ message: "Registration cancelled" });
+    } catch (err) {
+        res.status(400).json({ error: "Could not delete registration" });
+    }
+});
+
+// --- SERVER START ---
+app.listen(3001, () => console.log('🚀 Server running on http://localhost:3001'));
