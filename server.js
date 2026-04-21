@@ -7,6 +7,25 @@ app.use(express.json());
 
 // Replace 'your_mongodb_uri' with your actual MongoDB connection string
 // (You can get a free one from MongoDB Atlas or use 'mongodb://localhost:27017/eventDB')
+// --- USER ROUTES ---
+
+// Create a new User
+app.post('/users', async (req, res) => {
+    try {
+        const newUser = new User(req.body);
+        await newUser.save();
+        res.status(201).json(newUser);
+    } catch (err) {
+        res.status(400).json({ error: "Email already exists or invalid data" });
+    }
+});
+
+// View all Users (handy for finding IDs)
+app.get('/users', async (req, res) => {
+    const users = await User.find();
+    res.json(users);
+});
+
 mongoose.connect('mongodb://localhost:27017/eventDB')
     .then(() => console.log("✅ Connected to MongoDB"))
     .catch(err => console.error("❌ Connection error", err));
@@ -36,8 +55,10 @@ app.post('/register', async (req, res) => {
 
 // 4. View User Registrations (The "Linking" Part)
 app.get('/my-registrations/:userId', async (req, res) => {
-    // .populate('event') is the magic—it grabs the full event details using the ID
-    const myRegs = await Registration.find({ user: req.params.userId }).populate('event');
+    // We populate both 'user' and 'event' to show the full link
+    const myRegs = await Registration.find({ user: req.params.userId })
+        .populate('user', 'name email') // Only show name and email, hide the rest
+        .populate('event');
     res.json(myRegs);
 });
 
@@ -45,6 +66,17 @@ app.get('/my-registrations/:userId', async (req, res) => {
 app.delete('/cancel/:regId', async (req, res) => {
     await Registration.findByIdAndDelete(req.params.regId);
     res.json({ message: "Registration cancelled" });
+});
+
+// 6. View specific event details
+app.get('/events/:id', async (req, res) => {
+    try {
+        const event = await Event.findById(req.params.id);
+        if (!event) return res.status(404).json({ error: "Event not found" });
+        res.json(event);
+    } catch (err) {
+        res.status(400).json({ error: "Invalid Event ID" });
+    }
 });
 
 app.listen(3001, () => console.log('Server running on http://localhost:3001'));
