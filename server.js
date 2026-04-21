@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { User, Event, Registration } = require('./model'); // Ensure this is named 'model.js'
-const { verifyToken, isAdmin } = require('./middleware/auth');
+const { verifyToken, isAdmin } = require('./middleware/auth.js');
 
 const app = express();
 app.use(express.json());
