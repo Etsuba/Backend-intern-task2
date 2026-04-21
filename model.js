@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 // 1. User Model
 const userSchema = new mongoose.Schema({
     name: {type:"String", required:[true, "name is required"]},
-    email: { type: String, unique: true, required: true }
+    email: { type: String, unique: true, required: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' }
 });
 
 // 2. Event Model
